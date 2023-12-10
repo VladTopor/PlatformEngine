@@ -3,34 +3,44 @@
 #include <iostream>
 #include <fstream>
 #include "json.hpp"
-#include "multiplayer.h"
 //#include "box2d.h"
 #include "LuaCpp.hpp"
 #include <math.h>
+#include "logger.h"
+#include "multiplayer.h"
+#include <sfeMovie/Movie.hpp>
+
 #define UNIT_SIZE 64
 #define PI 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067
 //#include "btBulletDynamicsCommon.h"
+template <typename T>
+void info(T log) {
+    cout << "[\x1B[94mINFO\x1B[37m] " << log << '\n';}
+template <typename T>
+void warn(T log) {
+    cout << "[\x1B[93mWARN\x1B[37m] " << log << '\n';}
+template <typename T>
+void error(T log) {
+    cout << "[\x1B[91mERROR\x1B[37m] " << log << '\n';
+    exit(1);}
+template <typename T>
+void sucess(T log) {
+    cout << "[\x1B[92mSUCCESS\x1B[37m] " << log << '\n';}
+template <typename T>
+void debug(T log) {
+    cout << "[\x1B[95mDEBUG\x1B[37m] " << log << '\n';
+}
+
 using namespace LuaCpp::Registry;
 using namespace LuaCpp::Engine;
 using json = nlohmann::json;
 using namespace std;
-
-template <typename T>
-void info(T log) {
- cout << "[\x1B[94mINFO\x1B[37m] " << log << '\n';}
-template <typename T>
-void warn(T log) {
- cout << "[\x1B[93mWARN\x1B[37m] " << log << '\n';}
-template <typename T>
-void error(T log) {
- cout << "[\x1B[91mERROR\x1B[37m] " << log << '\n';
- exit(1);}
-template <typename T>
-void sucess(T log) {
- cout << "[\x1B[92mSUCCESS\x1B[37m] " << log << '\n';}
-template <typename T>
-void debug(T log) {
- cout << "[\x1B[95mDEBUG\x1B[37m] " << log << '\n';
+string getLocalizedString(string key, string local) {
+    std::ifstream ifs("assets/configs/langs.json");
+    //debug(key);
+    //debug(local);
+    json lang = json::parse(ifs);
+    return lang[local][key];
 }
 template<typename T>
 T Vector2length(const sf::Vector2<T>& v) {
@@ -45,7 +55,7 @@ sf::Vector2f fixed_pos(float camera_x, float camera_y, int screenWidth, int scre
 float camera_x = 0;
 float camera_y = 0;
 class Object {
-public: 
+public:
     float x = 0.0f;
     float y = 0.0f;
     float z = 0.0f;
@@ -81,8 +91,6 @@ public:
     string text;
     bool isActivated = false;
 
-    //FloatTriggerAction loop; //legacy
-
     string texturePath;
     sf::Texture texture;
     sf::Sprite sprite;
@@ -94,10 +102,10 @@ public:
             }
             sprite.setRotation(rotation);
             sprite.setScale(sf::Vector2f(width, height));
-        } 
+        }
     }
     void render(sf::RenderWindow& window) {
-        
+
         if (isActive) {
             if (text != "") {
                 sf::Text textW;
@@ -116,7 +124,7 @@ public:
             } else {
                 window.draw(sprite);
             }
-    }
+        }
         //debug(y);
     }
 
@@ -143,7 +151,7 @@ public:
                 bodyDef.position.Set(x, y);
                 body = world.CreateBody(&bodyDef);
                 hitBox.SetAsBox(texture.getSize().x*width/2, texture.getSize().y*height/2);
-                
+
                 physProps.shape = &hitBox;
                 physProps.density = 1.0f;
                 physProps.friction = 0.3f;
@@ -159,20 +167,22 @@ public:
         init();
     }
 };
-
+json save;
 unsigned long object_limit = 32768*50;
 //unsigned long object_limit = 2147483647/4;
 Object *objects = new Object[object_limit];
 Object *widgets = new Object[object_limit];
 int objects_count = 0;
 int widgets_count = 0;
-
+bool fixedCamera;
+float cameraScale = 1.0f;
+string lang = "uk-UA";
 sf::Color background;
 bool isLoading = true;
 string currentLoading;
 sf::SoundBuffer *buffers = new sf::SoundBuffer[64];
 sf::Sound *sounds = new sf::Sound[64];
-
+string currentLevel = "";
 ServerPlayer *players = new ServerPlayer[128];
 Object *playersObjects = new Object[128];
 LuaCpp::LuaContext lua;
@@ -183,7 +193,7 @@ bool isRight = false;
 bool isUp = false;
 bool isDown = false;
 bool fixedPhysics = false;
-void playSound(string path, int channel, bool loop) {
+void play_Sound(string path, int channel, bool loop) {
     if (!buffers[channel].loadFromFile(path)) {error("Failed to load sound");}
     sounds[channel].setBuffer(buffers[channel]);
     sounds[channel].setLoop(loop);
@@ -205,56 +215,59 @@ void load_ui(string levelName) {
     }
     for (int i = 0; i < widgets_count; i++) {
         if (true) { // Level 3 version parser
-        //warn("Legacy level version! This version level will be removed later! Upgrade it to use without problems");
-        debug("Applying positions");
-        widgets[i].fixedX = level["widgets"][i]["x"];
-        widgets[i].fixedY = level["widgets"][i]["y"];
-        widgets[i].isFixed = true;
-        widgets[i].isActive = true;
-        widgets[i].texturePath = "assets/textures/emo/2x2.png";
-        if (level["widgets"][i]["type"] == "button") {
-            widgets[i].texturePath = "assets/textures/button.png";
+            //warn("Legacy level version! This version level will be removed later! Upgrade it to use without problems");
+            //debug("Applying positions");
+            widgets[i].fixedX = level["widgets"][i]["x"];
+            widgets[i].fixedY = level["widgets"][i]["y"];
+            widgets[i].isFixed = true;
+            widgets[i].isActive = true;
+            widgets[i].texturePath = "assets/textures/emo/2x2.png";
+            if (level["widgets"][i]["type"] == "button") {
+                widgets[i].texturePath = "assets/textures/button.png";
 
-            widgets[i].width =  static_cast<float>(level["widgets"][i]["width"]) / 256.0f;
-            widgets[i].height = static_cast<float>(level["widgets"][i]["height"]) / 64.0f;
-            widgets[i].loop_script = "assets/scripts/blank.lua";
-            widgets[i].collide_script = "assets/scripts/blank.lua";
+                widgets[i].width =  static_cast<float>(level["widgets"][i]["width"]) / 256.0f;
+                widgets[i].height = static_cast<float>(level["widgets"][i]["height"]) / 64.0f;
+                widgets[i].loop_script = "assets/scripts/blank.lua";
+                widgets[i].collide_script = "assets/scripts/blank.lua";
 
-            if (static_cast<bool>(level["widgets"][i]["OnMouseDown"]) != false) {
-                widgets[i].collide_script = level["widgets"][i]["OnMouseDown"];
+                if (static_cast<bool>(level["widgets"][i]["OnMouseDown"]) != false) {
+                    widgets[i].collide_script = level["widgets"][i]["OnMouseDown"];
+                }
+                if (level["widgets"][i]["OnMouseUp"] != false) {
+
+                    widgets[i].loop_script = level["widgets"][i]["OnMouseUp"];
+                }
+
+            } else if(level["widgets"][i]["type"] == "label") {
+
+
             }
-            if (level["widgets"][i]["OnMouseUp"] != false) {
+            else {
 
-                widgets[i].loop_script = level["widgets"][i]["OnMouseUp"];
             }
-
-        } else if(level["widgets"][i]["type"] == "label") {
-
-
-        }
-        else {
-
-        }
-        widgets[i].offsetX = level["widgets"][i]["offset"][0];
-        widgets[i].offsetY = level["widgets"][i]["offset"][1];
-        widgets[i].textSize = level["widgets"][i]["fontSize"];
-        widgets[i].tag = level["widgets"][i]["type"];
-        widgets[i].text = level["widgets"][i]["text"];
-        //objects[i].loop.enabled = false
-        widgets[i].init();
+            widgets[i].offsetX = level["widgets"][i]["offset"][0];
+            widgets[i].offsetY = level["widgets"][i]["offset"][1];
+            widgets[i].textSize = level["widgets"][i]["fontSize"];
+            widgets[i].tag = level["widgets"][i]["type"];
+            widgets[i].text = level["widgets"][i]["text"];
+            //objects[i].loop.enabled = false
+            widgets[i].init();
 
         }
 
     }
-    sucess("Loaded!");
+    sucess(getLocalizedString("engine.sucess.done", lang));
     isLoading = false;
 
 }
 bool onBeginRunned = false;
 void load_level(string levelName, bool fast) {
-    info("Loading level "+levelName);
+    info(getLocalizedString("engine.info.loadlevel", lang)+levelName);
     isRight=true;
     std::ifstream level_file("assets/levels/"+levelName+"/level.json");
+    for (int j = 0; j < objects_count; j++) {
+        objects[j].isActive = false;
+    }
     json level = json::parse(level_file);
     objects_count = level["count"];
     background.r = level["background"][0];
@@ -282,43 +295,44 @@ void load_level(string levelName, bool fast) {
         objects = new Object[object_limit];
     }
     isLoading = true;
-    for (int j = 0; j < objects_count; j++) {
-        objects[j].isActive = false;
-    }
+    camera_x = level["camera"]["pos"][0];
+    camera_y = level["camera"]["pos"][1];
+    fixedCamera = level["camera"]["fixed"];
+    cameraScale = level["camera"]["scale"];
     for (int i = 0; i < objects_count; i++) {
         if (level["version"] == 3) { // Level 3 version parser
-        //warn("Legacy level version! This version level will be removed later! Upgrade it to use without problems");
-        objects[i].x = level["objects"][i]["position"]["x"];
-        objects[i].y = level["objects"][i]["position"]["y"];
-        objects[i].z = level["objects"][i]["position"]["z"];
-        objects[i].id = i;
-        objects[i].r = level["objects"][i]["color"]["r"];
-        objects[i].g = level["objects"][i]["color"]["g"];
-        objects[i].b = level["objects"][i]["color"]["b"];
-        objects[i].a = level["objects"][i]["color"]["a"];
-        objects[i].isActive = true;
+            //warn("Legacy level version! This version level will be removed later! Upgrade it to use without problems");
+            objects[i].x = level["objects"][i]["position"]["x"];
+            objects[i].y = level["objects"][i]["position"]["y"];
+            objects[i].z = level["objects"][i]["position"]["z"];
+            objects[i].id = i;
+            objects[i].r = level["objects"][i]["color"]["r"];
+            objects[i].g = level["objects"][i]["color"]["g"];
+            objects[i].b = level["objects"][i]["color"]["b"];
+            objects[i].a = level["objects"][i]["color"]["a"];
+            objects[i].isActive = true;
+            objects[i].ghost = !level["objects"][i]["collide"];
+            objects[i].texturePath = level["objects"][i]["texture"];
 
-        objects[i].texturePath = level["objects"][i]["texture"];
+            objects[i].width = level["objects"][i]["width"];
+            objects[i].height = level["objects"][i]["height"];
 
-        objects[i].width = level["objects"][i]["width"];
-        objects[i].height = level["objects"][i]["height"];
+            objects[i].isSmooth = level["objects"][i]["isSmooth"];
+            objects[i].isStatic = level["objects"][i]["isStatic"];
+            if (level["objects"][i]["scripts"]["OnTick"] != false) {
+                objects[i].loop_script = level["objects"][i]["scripts"]["OnTick"];
+            } else {
+                objects[i].loop_script = "assets/scripts/blank.lua";
+            }
 
-        objects[i].isSmooth = level["objects"][i]["isSmooth"];
-        objects[i].isStatic = level["objects"][i]["isStatic"];
-        if (level["objects"][i]["scripts"]["OnTick"] != false) {
-            objects[i].loop_script = level["objects"][i]["scripts"]["OnTick"];
-        } else {
-            objects[i].loop_script = "assets/scripts/blank.lua";
-        }
-
-        objects[i].rotation = level["objects"][i]["rotation"];
-        objects[i].tag = level["objects"][i]["tag"];
-        //objects[i].loop.enabled = false;
-        if (objects[i].tag == "trigger") {
-            objects[i].tag = "trigger";
-            objects[i].collide_script = level["objects"][i]["scripts"]["OnCollide"];
-        }
-        objects[i].init();
+            objects[i].rotation = level["objects"][i]["rotation"];
+            objects[i].tag = level["objects"][i]["tag"];
+            //objects[i].loop.enabled = false;
+            if (objects[i].tag == "trigger") {
+                objects[i].tag = "trigger";
+                objects[i].collide_script = level["objects"][i]["scripts"]["OnCollide"];
+            }
+            objects[i].init();
 
         }
         else
@@ -326,26 +340,27 @@ void load_level(string levelName, bool fast) {
             error("Failed to load level "+levelName+", because LevelVersion is illegal");
         }
         fixedPhysics = true;
-    if (level["smooth"]) {
-        for (int j = 0; j <objects_count; j++) {
-            if (objects[j].tag == "player") {
-                if (level["settings"]["smooth_x"] == true) {
-                    objects[j].x = x;
-                }
-                if (level["settings"]["smooth_y"] == true) {
-                    objects[j].y = y;
+        if (level["smooth"]) {
+            for (int j = 0; j <objects_count; j++) {
+                if (objects[j].tag == "player") {
+                    if (level["settings"]["smooth_x"] == true) {
+                        objects[j].x = x;
+                    }
+                    if (level["settings"]["smooth_y"] == true) {
+                        objects[j].y = y;
+                    }
                 }
             }
         }
     }
-    }
     isLoading = false;
+    currentLevel = levelName;
 }
 string floatToString(float d)
 {
-   stringstream ss;
-   ss << d;
-   return ss.str();
+    stringstream ss;
+    ss << d;
+    return ss.str();
 }
 float getTickrateMultiplier(float fps, int target)
 {
@@ -353,72 +368,77 @@ float getTickrateMultiplier(float fps, int target)
 }
 
 extern "C" {
-    int modifyObject(lua_State *L) {
-        int n = lua_gettop(L);
-        if (n!=3) {
-            warn("Lua script error: Need to use modifyObjecy(id, property, value)");
-        } else {
-            string property = lua_tostring(L, 2);
-            int id = lua_tonumber(L, 1);
-            if (property == "x") {
-                float value = lua_tonumber(L, 3);
-                objects[id].x = value;
-                //objects[id].body->SetTransform(b2Vec2(objects[id].x, objects[id].y), objects[id].body->GetAngle());
 
-            }
+int modifyObject(lua_State *L) {
+    int n = lua_gettop(L);
+    if (n!=3) {
+        warn("Lua script error: Need to use modifyObjecy(id, property, value)");
+    } else {
+        string property = lua_tostring(L, 2);
+        int id = lua_tonumber(L, 1);
+        if (property == "x") {
+            float value = lua_tonumber(L, 3);
+            objects[id].x = value;
+            //objects[id].body->SetTransform(b2Vec2(objects[id].x, objects[id].y), objects[id].body->GetAngle());
 
-            if (property == "y") {
-                float value = lua_tonumber(L, 3);
-                objects[id].y = value;
-                //objects[id].body->SetTransform(b2Vec2(objects[id].x, objects[id].y), objects[id].body->GetAngle());
-
-            }
-            if (property == "rot") {
-                float value = lua_tonumber(L, 3);
-                objects[id].rotation = value;
-                //objects[id].body->SetTransform(b2Vec2(objects[id].x, objects[id].y), objects[id].rotation);
-            }
-            
         }
+
+        if (property == "y") {
+            float value = lua_tonumber(L, 3);
+            objects[id].y = value;
+            //objects[id].body->SetTransform(b2Vec2(objects[id].x, objects[id].y), objects[id].body->GetAngle());
+
+        }
+        if (property == "rot") {
+            float value = lua_tonumber(L, 3);
+            objects[id].rotation = value;
+            //objects[id].body->SetTransform(b2Vec2(objects[id].x, objects[id].y), objects[id].rotation);
+        }
+
+    }
+    return 0;
+}
+int loadLevel(lua_State *L) {
+    int n = lua_gettop(L);
+    if (n > 3) {
+
+        warn("Lua script error: Need to use loadLevel(levelName, fast)");
+        lua_pushliteral(L, "Failed to load this level!");
         return 0;
     }
-    int loadLevel(lua_State *L) {
-        int n = lua_gettop(L);
-        if (n > 3) {
-
-            warn("Lua script error: Need to use loadLevel(levelName, fast)");
-            lua_pushliteral(L, "Failed to load this level!");
-            return 0;
-        }
-        string level = lua_tostring(L, 1);
-        load_level(level, lua_toboolean(L, 2));
-        return 1;
+    string level = lua_tostring(L, 1);
+    load_level(level, lua_toboolean(L, 2));
+    return 1;
+}
+int getLoadedLevel(lua_State *L) {
+    lua_pushstring(L, currentLevel.c_str());
+    return 0;
+}
+int loadUi(lua_State *L) {
+    int n = lua_gettop(L);
+    if (n > 2) {
+        warn("Lua script error: Need to use loadUi(uiName)");
+        lua_pushliteral(L, "Failed to load this layout!");
+        return 0;
     }
-    int loadUi(lua_State *L) {
-        int n = lua_gettop(L);
-        if (n > 2) {
-            warn("Lua script error: Need to use loadUi(uiName)");
-            lua_pushliteral(L, "Failed to load this layout!");
-            return 0;
-        }
-        string level = lua_tostring(L, 1);
-        load_ui(level);
-        return 1;
+    string level = lua_tostring(L, 1);
+    load_ui(level);
+    return 1;
+}
+int playSound(lua_State *L) {
+    int n = lua_gettop(L);
+    if (n > 3) {
+        warn("Lua script error: Need to use playSound(path, line, loop)");
+        lua_pushliteral(L, "Failed to load this level!");
+        return 0;
     }
-    int playSound(lua_State *L) {
-        int n = lua_gettop(L);
-        if (n > 3) {
-            warn("Lua script error: Need to use playSound(path, line, loop)");
-            lua_pushliteral(L, "Failed to load this level!");
-            return 0;
-        }
-        int channel = lua_tonumber(L, 2);
-        string level = lua_tostring(L, 1);
-        bool loop = lua_toboolean(L, 2);
-        playSound(level, channel, loop);
-        return 1;
-    }
-   int getProperty(lua_State *L) {
+    int channel = lua_tonumber(L, 2);
+    string level = lua_tostring(L, 1);
+    bool loop = lua_toboolean(L, 3);
+    play_Sound(level, channel, loop);
+    return 1;
+}
+int getProperty(lua_State *L) {
     int n = lua_gettop(L);
     lua_Number id = lua_tonumber(L, 1);
     if (n != 2) {
@@ -426,30 +446,30 @@ extern "C" {
         lua_pushliteral(L, "Usage: getProperty(id, property)");
     } else {
         string property = lua_tostring(L, 2);
-    if (property == "x") { 
-        id = lua_tonumber(L, 1);
-        int id_int = (int) id;
-        lua_pushnumber(L, objects[id_int].x);
-        return 1;
-    }
-    if (property == "rot") { 
-        id = lua_tonumber(L, 1);
-        int id_int = (int) id;
-        lua_pushnumber(L, objects[id_int].y);
-        return 1;
-    }
-     if (property == "y") { 
-        id = lua_tonumber(L, 1);
-        int id_int = (int) id;
-        lua_pushnumber(L, objects[id_int].rotation);
-        return 1;
-    } else {
-        return 0;
-    }
-    
+        if (property == "x") {
+            id = lua_tonumber(L, 1);
+            int id_int = (int) id;
+            lua_pushnumber(L, objects[id_int].x);
+            return 1;
+        }
+        if (property == "rot") {
+            id = lua_tonumber(L, 1);
+            int id_int = (int) id;
+            lua_pushnumber(L, objects[id_int].y);
+            return 1;
+        }
+        if (property == "y") {
+            id = lua_tonumber(L, 1);
+            int id_int = (int) id;
+            lua_pushnumber(L, objects[id_int].rotation);
+            return 1;
+        } else {
+            return 0;
+        }
+
     }
     return 0;
-   }
+}
 }
 
 bool collide(float x1, float y1, float width1, float height1, float x2, float y2, float width2, float height2, char direction, bool isActive) {
@@ -476,8 +496,8 @@ bool collide(float x1, float y1, float width1, float height1, float x2, float y2
 }
 int main()
 {
-    
-    
+
+
 
     float camera_scale = 1.0f;
 
@@ -489,63 +509,108 @@ int main()
     //int32 velocityIterations = 6;
     //int32 positionIterations = 2;
 
-    string version = "0.1 alpha";
+    string version = "0.2.0 alpha";
     info("Loading engine...");
     info("Version: "+version);
-    
-    
+
+
     info("Loading config...");
     std::ifstream config_file("config.json");
     json config = json::parse(config_file);
-    
+
     int width = 0;
     int height = 0;
+    int beginWidth = 0;
+    int beginHeight = 0;
     string game_title = config["game_name"];
     width = config["window_width"];
     height = config["window_height"];
-    sucess("Config loaded!");
+    beginWidth = config["window_width"];
+    beginHeight = config["window_height"];
 
-    info("Rendering window...");
+    sucess(getLocalizedString("engine.errors.configloaded", lang));
+    float beginAspectRatio = width/height;
+    info(getLocalizedString("engine.loading.loadrender", lang));
     sf::RenderWindow window(sf::VideoMode(width, height), "Platform Engine 2D rpg "+version+" - "+game_title);
+    sfe::Movie intro;
+    intro.openFromFile("assets/videos/intro.mp4");
+    intro.fit(0, 0, width, height, false);
+    intro.play();
+    bool isIntroPlaying = true;
+    while (window.isOpen() && isIntroPlaying) {
+        if (intro.getStatus() == sfe::Status::Stopped) {
+            isIntroPlaying = false;
+        }
+        sf::Event ev;
+        while (window.pollEvent(ev))
+        {
+            // Window closure
+            if (ev.type == sf::Event::Closed)
+            {
+                window.close();
+            }
+
+            if (ev.type == sf::Event::KeyPressed)
+            {
+                if (ev.key.code == sf::Keyboard::Escape) {
+                    isIntroPlaying = false;
+                }
+            }
+        }
+
+        intro.update();
+
+        // Render movie
+        window.clear();
+        window.draw(intro);
+        window.display();
+
+    }
+    intro.pause();
+    info("Showing intro...");
+    //Launching intro
+
+
     //sf::RenderWindow window(sf::VideoMode::getDesktopMode(), "Platform Engine 2D rpg "+version+" - "+game_title);
-    sucess("Rendered!");
+    sucess(getLocalizedString("engine.sucess.done", lang));
     framerate_limit = config["framerate_limit"];
     tickrate = config["tickrate"];
     float timeStep = 1.0f/(tickrate/4);
     window.setFramerateLimit(config["framerate_limit"]);
-    info("Showing intro...");
+
     sf::Texture texture;
-    sf::Sprite intro;
     texture.setSmooth(false);
     if (!texture.loadFromFile("assets/textures/intro_banner.png"))
     {
-        error("Failed to load banner! Plese, check assets/textures/intro_banner.png");
+        error(getLocalizedString("engine.errors.engineasset", lang));
     }
-    intro.setTexture(texture);
+
     sf::View camera(sf::FloatRect(0.0f, 0.0f, width, height));
 
-    sf::Clock clock;
+
     float lastTime = 0;
     sf::Font font;
     if (!font.loadFromFile("assets/fonts/font.ttf"))
     {
-        error("Failed to load font! Please check assets/fonts/font.ttf");
+        error(getLocalizedString("engine.errors.engineasset", lang));
     }
     sf::Text fps_text;
 
     fps_text.setFont(font);
     fps_text.setCharacterSize(50);
-    info("Starting lua...");
+    info(getLocalizedString("engine.loading.lua", lang));
 
     engine_lib->AddCFunction("getProperty", getProperty);
     engine_lib->AddCFunction("modifyObject", modifyObject);
     engine_lib->AddCFunction("loadLevel", loadLevel);
     engine_lib->AddCFunction("loadUi", loadUi);
     engine_lib->AddCFunction("playSound", playSound);
+    engine_lib->AddCFunction("getLoadedLevel", getLoadedLevel);
+
 
 
     lua.AddLibrary(engine_lib);
-    sucess("Loaded!");
+    sucess(getLocalizedString("engine.sucess.done", lang));
 
 
     bool debug = true;
@@ -560,11 +625,12 @@ int main()
     //playSound("assets/sounds/theme_player.wav", false);
     load_level(config["begin"], false);
     //load_ui("main");
+    sf::Clock clock;
 
     while (window.isOpen())
     {
 
-        camera.zoom(camera_scale);
+        camera.setSize(cameraScale*width, cameraScale*height);
         float currentTime = clock.restart().asSeconds();
         float fps = 1.f / (currentTime);
         lastTime = currentTime;
@@ -579,22 +645,23 @@ int main()
         while (window.pollEvent(event))
         {
             if (event.type == sf::Event::Closed)
-                window.close();  
+                window.close();
             if (event.type == sf::Event::Resized) {
-//                width = event.size.width;
-//                height = event.size.height;
-//
-//                double aspectRatio = static_cast<double >(width)/static_cast<double>(height);
+                //width = event.size.width;
+                //height = event.size.height;
+//                double aspectRatio = static_cast<float>(event.size.width)/static_cast<int>(event.size.height);
 //                info(aspectRatio);
+//                width = beginWidth;
 //                if (config["resize_mode"] == "width") {
-//                    camera.setSize({
-//                                           static_cast<float>(event.size.width),
-//                                           static_cast<float>(event.size.height/aspectRatio)
-//                    });
+//
+//                    //width = static_cast<int>(static_cast<float>(static_cast<float>(event.size.width)));
+//                    width *= aspectRatio;
+//                    height = static_cast<int>(static_cast<float>(static_cast<float>(event.size.height)));
+//
 //                }
-//
-//
-//                window.setView(camera);
+
+
+                window.setView(camera);
             }
         }
 
@@ -608,10 +675,10 @@ int main()
             if (trunc(script_rate) > script_now) {
                 script_now = trunc(script_rate);
                 //debug(script_now);
-                
-            } 
+
+            }
             //world.Step(timeStep, velocityIterations, positionIterations);
-            
+
             for (int i = 0; i < objects_count; i++) {
                 if (objects[i].loop_script != "assets/scripts/blank.lua") {
                     lua.CompileFileAndRun(objects[i].loop_script);
@@ -627,20 +694,19 @@ int main()
                         objects[i].x -= speed*getTickrateMultiplier(tickrate, fps);
                         for (int j = 0; j < objects_count; j++) {
                             if (objects[j].tag != "player") {
+                                if (collide(objects[i].x, objects[i].y, objects[i].width*objects[i].texture.getSize().x, objects[i].height*objects[i].texture.getSize().y,
+                                            objects[j].x, objects[j].y, objects[j].width*objects[j].texture.getSize().x, objects[j].height*objects[j].texture.getSize().y, 'l', objects[j].isActive&&!objects[j].ghost)) {
+                                    if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
+                                        lua.CompileFileAndRun(objects[j].collide_script);
+                                        objects[j].isActivated = true;
+                                        break;
+                                    }
+                                    objects[i].x += speed*2*getTickrateMultiplier(tickrate, fps);
 
-                            if (collide(objects[i].x, objects[i].y, objects[i].width*32, objects[i].height*32,
-                                        objects[j].x, objects[j].y, objects[j].width*32, objects[j].height*32, 'l', objects[j].isActive)) {
-                                if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
-                                    lua.CompileFileAndRun(objects[j].collide_script);
-                                    objects[j].isActivated = true;
-                                    break;
+                                } else {
+                                    objects[j].isActivated = false;
                                 }
-                                objects[i].x += speed*2*getTickrateMultiplier(tickrate, fps);
-                                   
-                            } else {
-                                objects[j].isActivated = false;
                             }
-                        }
                         }
                     }
                     if (isRight)
@@ -650,8 +716,8 @@ int main()
                         for (int j = 0; j < objects_count; j++) {
                             if (objects[j].tag != "player") {
 
-                                if (collide(objects[i].x, objects[i].y, objects[i].width*32, objects[i].height*32,
-                                            objects[j].x, objects[j].y, objects[j].width*32, objects[j].height*32, 'r', objects[j].isActive)) {
+                                if (collide(objects[i].x, objects[i].y, objects[i].width*objects[i].texture.getSize().x, objects[i].height*objects[i].texture.getSize().y,
+                                            objects[j].x, objects[j].y, objects[j].width*objects[j].texture.getSize().x, objects[j].height*objects[j].texture.getSize().y, 'r', objects[j].isActive&&!objects[j].ghost)) {
                                     if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
                                         lua.CompileFileAndRun(objects[j].collide_script);
                                         objects[j].isActivated = true;
@@ -673,8 +739,8 @@ int main()
                         for (int j = 0; j < objects_count; j++) {
                             if (objects[j].tag != "player") {
 
-                                if (collide(objects[i].x, objects[i].y, objects[i].width*32, objects[i].height*32,
-                                            objects[j].x, objects[j].y, objects[j].width*32, objects[j].height*32, 'u', objects[j].isActive)) {
+                                if (collide(objects[i].x, objects[i].y, objects[i].width*objects[i].texture.getSize().x, objects[i].height*objects[i].texture.getSize().y,
+                                             objects[j].x, objects[j].y, objects[j].width*objects[j].texture.getSize().x, objects[j].height*objects[j].texture.getSize().y, 'u', objects[j].isActive&&!objects[j].ghost)) {
 
                                     if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
                                         lua.CompileFileAndRun(objects[j].collide_script);
@@ -696,8 +762,8 @@ int main()
                         for (int j = 0; j < objects_count; j++) {
                             if (objects[j].tag != "player") {
 
-                                if (collide(objects[i].x, objects[i].y, objects[i].width*32, objects[i].height*32,
-                                            objects[j].x, objects[j].y, objects[j].width*32, objects[j].height*32, 'd', objects[j].isActive)) {
+                                if (collide(objects[i].x, objects[i].y, objects[i].width*objects[i].texture.getSize().x, objects[i].height*objects[i].texture.getSize().y,
+                                            objects[j].x, objects[j].y, objects[j].width*objects[j].texture.getSize().x, objects[j].height*objects[j].texture.getSize().y, 'd', objects[j].isActive&&!objects[j].ghost)) {
                                     if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
                                         lua.CompileFileAndRun(objects[j].collide_script);
                                         objects[j].isActivated = true;
@@ -715,31 +781,31 @@ int main()
                         //isRight = false;
                         fixedPhysics = true;
                     }
-                    if (!debug) {
+                    if (!debug && !fixedCamera) {
                         camera_x = objects[i].x;
                         camera_y = objects[i].y;
-                           
+
                     }
                 }
                 if (runLoop) {
-                    
+
                     try {
-                        
+
                         lua.CompileFileAndRun(objects[i].loop_script);
                     }
-                 
+
                     catch (std::runtime_error& e) {
                         std::cout << e.what()
                                   << '\n';
                     }
-                    
+
                 }
-                if (!debug && objects[i].tag == "trigger") { 
-                    continue; 
-                } 
+                if (!debug && objects[i].texturePath == "assets/textures/trigger.png") {
+                    continue;
+                }
                 objects[i].render(window);
 
-            runLoop = false;
+                runLoop = false;
 
             }
             if (script_rate > 1) {
@@ -792,17 +858,18 @@ int main()
         isLeft = sf::Keyboard::isKeyPressed(sf::Keyboard::A);
         isRight = sf::Keyboard::isKeyPressed(sf::Keyboard::D);
 
-        fps_text.setPosition(fixed_pos(camera_x, camera_y, width, height, 0, 0));
-        
+        fps_text.setPosition(fixed_pos(camera_x, camera_y, width, height, cameraScale, cameraScale));
+
         fps_text.setString("FPS="+floatToString(fps));
 
-        
-        
+
         if (debug) {
+            //info(camera_x);
+            //info(camera_y);
             window.draw(fps_text);
         }
         window.display();
     }
-
+    info(getLocalizedString("engine.ui.exit", lang));
     return 0;
 }
