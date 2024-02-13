@@ -1,18 +1,26 @@
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
 #include <iostream>
+#include <PhysicEngine.hpp>
 #include <fstream>
 #include "json.hpp"
-//#include "box2d.h"
 #include "LuaCpp.hpp"
+//#include <PhysicEngine.hpp>
 #include <math.h>
-#include "logger.h"
 #include "multiplayer.h"
 #include <sfeMovie/Movie.hpp>
+#include "imgui.h"
+#include "imgui_stdlib.h"
+#include "imgui-SFML.h"
+#include "ItemStack.h"
+#include "Object.h"
+#include "EngineFunctions.h"
+#include "EngineEditor.h"
+#include <Widget.h>
+#include <config.h>
+#include "json.hpp"
+using json = nlohmann::json;
 
-#define UNIT_SIZE 64
-#define PI 3.141592653589793238462643383279502884197169399375105820974944592307816406286208998628034825342117067
-//#include "btBulletDynamicsCommon.h"
 template <typename T>
 void info(T log) {
     cout << "[\x1B[94mINFO\x1B[37m] " << log << '\n';}
@@ -20,158 +28,38 @@ template <typename T>
 void warn(T log) {
     cout << "[\x1B[93mWARN\x1B[37m] " << log << '\n';}
 template <typename T>
-void error(T log) {
-    cout << "[\x1B[91mERROR\x1B[37m] " << log << '\n';
+void fatal(T log) {
+    cout << "[\x1B[91mFATAL\x1B[37m] " << log << '\n';
     exit(1);}
 template <typename T>
 void sucess(T log) {
     cout << "[\x1B[92mSUCCESS\x1B[37m] " << log << '\n';}
 template <typename T>
 void debug(T log) {
-    cout << "[\x1B[95mDEBUG\x1B[37m] " << log << '\n';
+    if (DEBUG_LOGS) {
+        cout << "[\x1B[95mDEBUG\x1B[37m] " << log << '\n';
+    }
 }
+void error(string text, sf::RenderWindow &window);
 
 using namespace LuaCpp::Registry;
 using namespace LuaCpp::Engine;
-using json = nlohmann::json;
-using namespace std;
-string getLocalizedString(string key, string local) {
-    std::ifstream ifs("assets/configs/langs.json");
-    //debug(key);
-    //debug(local);
-    json lang = json::parse(ifs);
-    return lang[local][key];
-}
-template<typename T>
-T Vector2length(const sf::Vector2<T>& v) {
-    return std::sqrt(v.x * v.x + v.y * v.y);
-}
 
-//b2Vec2 gravity(0.0f, 10.0f);
-//b2World world(gravity);
-sf::Vector2f fixed_pos(float camera_x, float camera_y, int screenWidth, int screenHeight, float fixed_x, float fixed_y) {
-    return sf::Vector2f((camera_x-screenWidth/2+fixed_x), (camera_y-screenHeight/2+fixed_y));
-}
+
+
+
 float camera_x = 0;
 float camera_y = 0;
-class Object {
-public:
-    float x = 0.0f;
-    float y = 0.0f;
-    float z = 0.0f;
-    float scriptX = -1.0f;
-    float scriptY = -1.0f;
-    int id = 0;
-    float width = 1.0f;
-    float height = 1.0f;
 
-    int textSize = 0;
-
-    float rotation = 0.0f;
-    bool isSmooth = false;
-    bool isStatic = false;
-    bool ghost = false;
-    bool isActive = false;
-    bool isUI = false;
-    int r = 255;
-    int g = 255;
-    int b = 255;
-    int a = 255;
-
-    float fixedX;
-    float fixedY;
-
-    float offsetX;
-    float offsetY;
-
-    bool isFixed = false;
-    string tag;
-    string loop_script;
-    string collide_script;
-    string text;
-    bool isActivated = false;
-
-    string texturePath;
-    sf::Texture texture;
-    sf::Sprite sprite;
-    void apply() {
-        if(isActive) {
-            sprite.setPosition(sf::Vector2f(x, y));
-            if (isFixed) {
-                sprite.setPosition(fixed_pos(camera_x, camera_y, 1920, 1080, fixedX, fixedY));
-            }
-            sprite.setRotation(rotation);
-            sprite.setScale(sf::Vector2f(width, height));
-        }
-    }
-    void render(sf::RenderWindow& window) {
-
-        if (isActive) {
-            if (text != "") {
-                sf::Text textW;
-                sf::Font font;
-                if (!font.loadFromFile("assets/fonts/font.ttf"))
-                {
-                    error("Failed to load font! Please check assets/fonts/font.ttf");
-                }
-                textW.setFont(font);
-                textW.setCharacterSize(textSize);
-                textW.setString(text);
-                textW.setPosition(fixed_pos(camera_x, camera_y, 1920, 1080, fixedX+offsetX, fixedY+offsetY));
-                window.draw(sprite);
-                window.draw(textW);
-
-            } else {
-                window.draw(sprite);
-            }
-        }
-        //debug(y);
-    }
-
-    void init() {
-        //info("Loading textures...");
-        if (!texture.loadFromFile(texturePath))
-        {
-            error("Can`t find "+texturePath);
-        }
-
-        texture.setSmooth(isSmooth);
-        sprite.setTexture(texture);
-        sprite.setColor(sf::Color(r, g, b, a));
-        //sucess("Textures started");
-        //info("Adding physic... (Skipped)");
-        /*if (!ghost) {
-            if (isStatic) {
-                bodyDef.position.Set(x, y);
-                body = world.CreateBody(&bodyDef);
-                hitBox.SetAsBox(texture.getSize().x*width/2, texture.getSize().y*height/2);
-                body->CreateFixture(&hitBox, 0.0f);
-            } else {
-                bodyDef.type = b2_dynamicBody;
-                bodyDef.position.Set(x, y);
-                body = world.CreateBody(&bodyDef);
-                hitBox.SetAsBox(texture.getSize().x*width/2, texture.getSize().y*height/2);
-
-                physProps.shape = &hitBox;
-                physProps.density = 1.0f;
-                physProps.friction = 0.3f;
-
-                body->CreateFixture(&physProps);
-            }
-        }*/
-        //info("Adding badass physic...");
-
-    }
-    void setTexture(string path){
-        texturePath = path;
-        init();
-    }
-};
 json save;
-unsigned long object_limit = 32768*50;
+unsigned long object_limit = OBJECT_LIMIT;
 //unsigned long object_limit = 2147483647/4;
-Object *objects = new Object[object_limit];
-Object *widgets = new Object[object_limit];
+#if LAUNCH_EDITOR == false
+    EngineObject *objects = new EngineObject[object_limit];
+#else
+    EngineObject *objects = new EngineObject[1];
+#endif
+Widget *widgets = new Widget[object_limit];
 int objects_count = 0;
 int widgets_count = 0;
 bool fixedCamera;
@@ -184,21 +72,25 @@ sf::SoundBuffer *buffers = new sf::SoundBuffer[64];
 sf::Sound *sounds = new sf::Sound[64];
 string currentLevel = "";
 ServerPlayer *players = new ServerPlayer[128];
-Object *playersObjects = new Object[128];
+EngineObject *playersEngineObjects = new EngineObject[128];
 LuaCpp::LuaContext lua;
+sf::Texture *staticTextures = new sf::Texture[64];
 std::shared_ptr<LuaLibrary> engine_lib = std::make_shared<LuaLibrary>("engine");
 float speed;
+float fastSpeed;
 bool isLeft = false;
 bool isRight = false;
 bool isUp = false;
 bool isDown = false;
 bool fixedPhysics = false;
+
 void play_Sound(string path, int channel, bool loop) {
-    if (!buffers[channel].loadFromFile(path)) {error("Failed to load sound");}
+    if (!buffers[channel].loadFromFile(path)) {fatal("Failed to load sound");}
     sounds[channel].setBuffer(buffers[channel]);
     sounds[channel].setLoop(loop);
     sounds[channel].play();
 }
+bool run = false;
 void load_ui(string levelName) {
     info("Loading UI layout "+levelName);
 
@@ -251,6 +143,7 @@ void load_ui(string levelName) {
             widgets[i].tag = level["widgets"][i]["type"];
             widgets[i].text = level["widgets"][i]["text"];
             //objects[i].loop.enabled = false
+            widgets[i].physic_enabled = false;
             widgets[i].init();
 
         }
@@ -261,7 +154,9 @@ void load_ui(string levelName) {
 
 }
 bool onBeginRunned = false;
+string loaded_level_name = "";
 void load_level(string levelName, bool fast) {
+    loaded_level_name = levelName;
     info(getLocalizedString("engine.info.loadlevel", lang)+levelName);
     isRight=true;
     std::ifstream level_file("assets/levels/"+levelName+"/level.json");
@@ -269,11 +164,14 @@ void load_level(string levelName, bool fast) {
         objects[j].isActive = false;
     }
     json level = json::parse(level_file);
+    int objects_count_old = objects_count;
     objects_count = level["count"];
     background.r = level["background"][0];
     background.g = level["background"][1];
     background.b = level["background"][2];
+    //Areset();
     speed = level["speed"];
+    fastSpeed = level["fastSpeed"];
     if (level["OnLoad"] != false) {
         lua.CompileFileAndRun(level["OnLoad"]);
     }
@@ -290,18 +188,36 @@ void load_level(string levelName, bool fast) {
 
     //b2Vec2 gravity(level["gravity_x"], level["gravity_y"]);
     //b2World world(gravity);
+    for (int i = 0; i<objects_count_old; i++){
+        if (objects[i].physic_enabled) {
+            if (objects[i].physic_static) {
+                objects[i].static_physic.remove();
+            } else {
+                objects[i].dynamic_physic.remove();
+            }
+        }
+    }
     if (!fast) {
+        //simulate();
+
         delete[] objects;
-        objects = new Object[object_limit];
+        objects = new EngineObject[object_limit];
     }
     isLoading = true;
+
     camera_x = level["camera"]["pos"][0];
     camera_y = level["camera"]["pos"][1];
     fixedCamera = level["camera"]["fixed"];
     cameraScale = level["camera"]["scale"];
+    if (level["version"] == 3) {
+        camera_x -= 32;
+        camera_y -= 32;
+    }
     for (int i = 0; i < objects_count; i++) {
-        if (level["version"] == 3) { // Level 3 version parser
+
+        if (level["version"] > 0) { // Level 3 version parser
             //warn("Legacy level version! This version level will be removed later! Upgrade it to use without problems");
+            //objects[i].staticTexture = level["objects"][i]["staticTexture"];
             objects[i].x = level["objects"][i]["position"]["x"];
             objects[i].y = level["objects"][i]["position"]["y"];
             objects[i].z = level["objects"][i]["position"]["z"];
@@ -312,7 +228,13 @@ void load_level(string levelName, bool fast) {
             objects[i].a = level["objects"][i]["color"]["a"];
             objects[i].isActive = true;
             objects[i].ghost = !level["objects"][i]["collide"];
-            objects[i].texturePath = level["objects"][i]["texture"];
+            try {
+                objects[i].texturePath = level["objects"][i]["texture"];
+            } catch (nlohmann::json::exception) {
+                objects[i].texturePath = "assets/textures/emo/64x64.png";
+            }
+
+
 
             objects[i].width = level["objects"][i]["width"];
             objects[i].height = level["objects"][i]["height"];
@@ -332,12 +254,35 @@ void load_level(string levelName, bool fast) {
                 objects[i].tag = "trigger";
                 objects[i].collide_script = level["objects"][i]["scripts"]["OnCollide"];
             }
+            try {
+                objects[i].physic_enabled = level["objects"][i]["physics"]["enabled"];
+                if (level["objects"][i]["physics"]["dynamic"]) {
+                    objects[i].physic_static = false;
+                } else {
+                    objects[i].physic_static = true;
+                }
+
+            } catch (json::exception) {
+                warn("Physics settings not defined!");
+                objects[i].physic_enabled = true;
+                objects[i].physic_static = true;
+                if (objects[i].tag == "player") {
+                    setGravity(b2Vec2(0, 0));
+                    objects[i].physic_static = false;
+
+
+                }
+            }
+
             objects[i].init();
+            if (objects[i].tag == "player") {
+                objects[i].getBody()->SetFixedRotation(true);
+            }
 
         }
         else
         {
-            error("Failed to load level "+levelName+", because LevelVersion is illegal");
+            fatal("Failed to load level "+levelName+", because LevelVersion is illegal");
         }
         fixedPhysics = true;
         if (level["smooth"]) {
@@ -356,42 +301,38 @@ void load_level(string levelName, bool fast) {
     isLoading = false;
     currentLevel = levelName;
 }
-string floatToString(float d)
-{
-    stringstream ss;
-    ss << d;
-    return ss.str();
-}
-float getTickrateMultiplier(float fps, int target)
-{
-    return fps/target;
-}
+
 
 extern "C" {
 
-int modifyObject(lua_State *L) {
+int modifyEngineObject(lua_State *L) {
     int n = lua_gettop(L);
     if (n!=3) {
-        warn("Lua script error: Need to use modifyObjecy(id, property, value)");
+        warn(getLocalizedString("engine.fatals.luafatal", lang, "modifyEngineObject(id, property, value)"));
     } else {
         string property = lua_tostring(L, 2);
         int id = lua_tonumber(L, 1);
         if (property == "x") {
             float value = lua_tonumber(L, 3);
-            objects[id].x = value;
+            objects[id].getBody()->SetTransform(b2Vec2(value, objects[id].getBody()->GetPosition().y), objects[id].getBody()->GetAngle());
+            objects[id].apply();
             //objects[id].body->SetTransform(b2Vec2(objects[id].x, objects[id].y), objects[id].body->GetAngle());
 
         }
 
         if (property == "y") {
             float value = lua_tonumber(L, 3);
-            objects[id].y = value;
+            objects[id].getBody()->SetTransform(b2Vec2(objects[id].getBody()->GetPosition().x, value), objects[id].getBody()->GetAngle());
+            objects[id].apply();
+            //info(value);
+            //info(id);
             //objects[id].body->SetTransform(b2Vec2(objects[id].x, objects[id].y), objects[id].body->GetAngle());
 
         }
         if (property == "rot") {
             float value = lua_tonumber(L, 3);
-            objects[id].rotation = value;
+            objects[id].getBody()->SetTransform(objects[id].getBody()->GetPosition(), value);
+            objects[id].apply();
             //objects[id].body->SetTransform(b2Vec2(objects[id].x, objects[id].y), objects[id].rotation);
         }
 
@@ -402,7 +343,7 @@ int loadLevel(lua_State *L) {
     int n = lua_gettop(L);
     if (n > 3) {
 
-        warn("Lua script error: Need to use loadLevel(levelName, fast)");
+        warn(getLocalizedString("engine.fatals.luafatal", lang, "loadLevel(level, fast)"));
         lua_pushliteral(L, "Failed to load this level!");
         return 0;
     }
@@ -417,7 +358,7 @@ int getLoadedLevel(lua_State *L) {
 int loadUi(lua_State *L) {
     int n = lua_gettop(L);
     if (n > 2) {
-        warn("Lua script error: Need to use loadUi(uiName)");
+        warn(getLocalizedString("engine.fatals.luafatal", lang, "loadUi(ui_layout)"));
         lua_pushliteral(L, "Failed to load this layout!");
         return 0;
     }
@@ -428,7 +369,7 @@ int loadUi(lua_State *L) {
 int playSound(lua_State *L) {
     int n = lua_gettop(L);
     if (n > 3) {
-        warn("Lua script error: Need to use playSound(path, line, loop)");
+        warn(getLocalizedString("engine.fatals.luafatal", lang, "playSound(path, line, loop)"));
         lua_pushliteral(L, "Failed to load this level!");
         return 0;
     }
@@ -442,7 +383,7 @@ int getProperty(lua_State *L) {
     int n = lua_gettop(L);
     lua_Number id = lua_tonumber(L, 1);
     if (n != 2) {
-
+        warn(getLocalizedString("engine.fatals.luafatal", lang, "getProperty(id, property)"));
         lua_pushliteral(L, "Usage: getProperty(id, property)");
     } else {
         string property = lua_tostring(L, 2);
@@ -470,6 +411,17 @@ int getProperty(lua_State *L) {
     }
     return 0;
 }
+int setWidgetText(lua_State *L) {
+    int n = lua_gettop(L);
+    if (n != 2) {
+        warn(getLocalizedString("engine.fatals.luafatal", lang, "setWidgetText(id, text)"));
+        lua_pushliteral(L, "Usage: setWidgetText(id, text)");
+    } else {
+        int id = lua_tonumber(L, 1);
+        string text = lua_tostring(L, 2);
+        widgets[id].text = text;
+}
+}
 }
 
 bool collide(float x1, float y1, float width1, float height1, float x2, float y2, float width2, float height2, char direction, bool isActive) {
@@ -484,32 +436,88 @@ bool collide(float x1, float y1, float width1, float height1, float x2, float y2
         if (((y2 < y1 && y2+height2 > y1) || (y2 < y1+height1 && y2+height2 > y1+height1)) && ((x2 < x1)&&(x2+width2 > x1))) return true;
     }
     if (direction == 'r') {
-        return collide(x2, y2, width2, height2, x1, y1, width1, height1, 'l', true);
+        if (((y2 < y1 && y2+height2 > y1) || (y2 < y1+height1 && y2+height2 > y1+height1)) && ((x2+width2 > x1+width1)&&(x2 < x1+width1))) return true;
     }
     if (direction == 'u') {
         if (((x2 < x1 && x2+width2 > x1) || (x2 < x1+width1 && x2+width2 > x1+width1)) && ((y2 < y1)&&(y2+height2 > y1))) return true;
     }
     if (direction == 'd') {
-        return collide(x2, y2, width2, height2, x1, y1, width1, height1, 'u', true);
+        if (((x2 < x1 && x2+width2 > x1) || (x2 < x1+width1 && x2+width2 > x1+width1)) && ((y2+height2 > y1+height1)&&(y2 < y1+height1))) return true;
     }
     return false;
 }
+int width = 0;
+int height = 0;
+int beginWidth = 0;
+int beginHeight = 0;
+int framerate_limit = 0;
+int tickrate;
+float script_rate = 0.0f;
+float script_now = 0;
+bool runLoop = false;
+bool debug_mode = false;
+bool isMultiplayer = false;
+string game_title;
+string address = "127.0.0.1";
+string version = "0.0.4 alpha";
+
+void error(string text, sf::RenderWindow &window) {
+    sf::Clock imgui_clock;
+    /*ImGuiIO& io = ImGui::GetIO();
+    ImFontConfig font_config;
+    font_config.OversampleH = 1; //or 2 is the same
+    font_config.OversampleV = 1;
+    font_config.PixelSnapH = 1;
+
+    static const ImWchar ranges[] =
+            {
+                    0x0020, 0x00FF, // Basic Latin + Latin Supplement
+                    0x0400, 0x044F, // Cyrillic
+                    0,
+            };
+    io.Fonts->AddFontFromFileTTF("assets/fonts/font2.ttf", 14.0f, &font_config, ranges);
+    */
+    while (window.isOpen()) {
+        ImGui::SFML::Update(window, imgui_clock.restart());
+        window.clear(sf::Color(0, 0, 0));
+        sf::Event event;
+        while (window.pollEvent(event)) {
+            if (event.type == sf::Event::Closed)
+                window.close();
+            ImGui::SFML::ProcessEvent(window, event);
+        }
+        ImGui::Begin("Platform engine error");
+        ImGui::Text("Platform Engine was crashed!\nStop code:");
+        ImGui::Text((text).c_str());
+        ImGui::Text("To fix, you need to contact support, report bug or reinstall game");
+        ImGui::Text("Technical info:");
+        ImGui::InputText("Version", &version, ImGuiInputTextFlags_ReadOnly);
+        ImGui::Checkbox("Is online", &isMultiplayer);
+        ImGui::InputText("IP adress", &address, ImGuiInputTextFlags_ReadOnly);
+        ImGui::InputText("Loaded level", &loaded_level_name, ImGuiInputTextFlags_ReadOnly);
+        if (ImGui::Button("Exit")) {
+            exit(1);
+        }
+        if (ImGui::Button("Report bug")) {
+            openWebBrowser("http://vladtopor.dev/report?app_id=perpg");
+        }
+        if (ImGui::Button("Support")) {
+            openWebBrowser("http://vladtopor.dev/support?app_id=perpg");
+        }
+
+        ImGui::End();
+        ImGui::SFML::Render(window);
+        window.display();
+    }
+}
 int main()
 {
+    //gravity.Set(0.0f, -10.0f);
 
-
-
-    float camera_scale = 1.0f;
-
-    int framerate_limit = 0;
-    int tickrate;
-    float script_rate = 0.0f;
-    float script_now = 0;
-    bool runLoop = false;
     //int32 velocityIterations = 6;
     //int32 positionIterations = 2;
 
-    string version = "0.2.0 alpha";
+
     info("Loading engine...");
     info("Version: "+version);
 
@@ -517,26 +525,107 @@ int main()
     info("Loading config...");
     std::ifstream config_file("config.json");
     json config = json::parse(config_file);
+    info("Loading key codes");
+    std::ifstream codesFile("assets/configs/codes.json");
+    json codes = json::parse(codesFile);
+    info("Loading keys codes");
+    std::ifstream keyFile("assets/configs/keys.json");
+    json keys = json::parse(keyFile);
+    info("Loading localization");
+    initiateLocalization();
 
-    int width = 0;
-    int height = 0;
-    int beginWidth = 0;
-    int beginHeight = 0;
     string game_title = config["game_name"];
     width = config["window_width"];
     height = config["window_height"];
     beginWidth = config["window_width"];
     beginHeight = config["window_height"];
 
-    sucess(getLocalizedString("engine.errors.configloaded", lang));
+    sucess(getLocalizedString("engine.fatals.configloaded", lang));
     float beginAspectRatio = width/height;
     info(getLocalizedString("engine.loading.loadrender", lang));
-    sf::RenderWindow window(sf::VideoMode(width, height), "Platform Engine 2D rpg "+version+" - "+game_title);
+    sf::RenderWindow window;
+    bool fullscreen = false;
+    if (!fullscreen) {
+        window.create(sf::VideoMode(width, height), "Platform Engine 2D rpg " + version + " - " + game_title);
+    } else {
+        window.create(sf::VideoMode(width, height), "Platform Engine 2D rpg " + version + " - " + game_title, sf::Style::Fullscreen);
+    }
+    info("Starting ImGUI...");
+    ImGui::SFML::Init(window);
+    if (LAUNCH_EDITOR) {
+        editor(window, "main");
+    }
+    sucess("Done");
+    info("Starting physics...");
+    startPhysics();
+    sucess("Done");
+    info("Setting icon...");
+    sf::Image icon;
+    icon.loadFromFile(config["icon"]); // File/Image/Pixel
+    window.setIcon(icon.getSize().x, icon.getSize().y, icon.getPixelsPtr());
+    sucess("Done");
+    info("Showing intro...");
+    //Launching introcameraScale
+
+
+    //sf::RenderWindow window(sf::VideoMode::getDesktopMode(), "Platform Engine 2D rpg "+version+" - "+game_title);
+    sucess(getLocalizedString("engine.sucess.done", lang));
+    framerate_limit = config["framerate_limit"];
+    tickrate = config["tickrate"];
+    setTickrate(tickrate);
+    float timeStep = 1.0f/(tickrate);
+    window.setFramerateLimit(config["framerate_limit"]);
+
+    sf::View camera(sf::FloatRect(0.0f, 0.0f, width, height));
+
+
+    float lastTime = 0;
+    sf::Font font;
+    if (!font.loadFromFile("assets/fonts/font.ttf"))
+    {
+        error(getLocalizedString("engine.fatals.engineasset", lang), window);
+    }
+    sf::Text fps_text;
+
+    fps_text.setFont(font);
+    fps_text.setCharacterSize(50);
+    info(getLocalizedString("engine.loading.lua", lang));
+
+    engine_lib->AddCFunction("getProperty", getProperty);
+    engine_lib->AddCFunction("modifyEngineObject", modifyEngineObject);
+    engine_lib->AddCFunction("loadLevel", loadLevel);
+    engine_lib->AddCFunction("loadUi", loadUi);
+    engine_lib->AddCFunction("playSound", playSound);
+    engine_lib->AddCFunction("getLoadedLevel", getLoadedLevel);
+    engine_lib->AddCFunction("setWidgetText", setWidgetText);
+
+
+    lua.AddLibrary(engine_lib);
+    sucess(getLocalizedString("engine.sucess.done", lang));
+
+    sf::Clock imgui_clock;
+
+
+    /*ServerPlayer serverplayer;
+    serverplayer.address = address;
+    serverplayer.username = "VladTopor";
+    if (isMultiplayer) {
+        serverplayer.join();
+    }*/
+    //playSound("assets/sounds/theme_player.wav", false);
+
+    //load_ui("main");
+    sf::Clock clock;
     sfe::Movie intro;
     intro.openFromFile("assets/videos/intro.mp4");
     intro.fit(0, 0, width, height, false);
     intro.play();
     bool isIntroPlaying = true;
+    //error("Test error", window);
+    //PhysicObjectDynamic object;
+
+    //object.init(1.0f, 1.0f, 1.0f, 1.0f);
+
     while (window.isOpen() && isIntroPlaying) {
         if (intro.getStatus() == sfe::Status::Stopped) {
             isIntroPlaying = false;
@@ -567,95 +656,82 @@ int main()
 
     }
     intro.pause();
-    info("Showing intro...");
-    //Launching intro
-
-
-    //sf::RenderWindow window(sf::VideoMode::getDesktopMode(), "Platform Engine 2D rpg "+version+" - "+game_title);
-    sucess(getLocalizedString("engine.sucess.done", lang));
-    framerate_limit = config["framerate_limit"];
-    tickrate = config["tickrate"];
-    float timeStep = 1.0f/(tickrate/4);
-    window.setFramerateLimit(config["framerate_limit"]);
-
-    sf::Texture texture;
-    texture.setSmooth(false);
-    if (!texture.loadFromFile("assets/textures/intro_banner.png"))
-    {
-        error(getLocalizedString("engine.errors.engineasset", lang));
-    }
-
-    sf::View camera(sf::FloatRect(0.0f, 0.0f, width, height));
-
-
-    float lastTime = 0;
-    sf::Font font;
-    if (!font.loadFromFile("assets/fonts/font.ttf"))
-    {
-        error(getLocalizedString("engine.errors.engineasset", lang));
-    }
-    sf::Text fps_text;
-
-    fps_text.setFont(font);
-    fps_text.setCharacterSize(50);
-    info(getLocalizedString("engine.loading.lua", lang));
-
-    engine_lib->AddCFunction("getProperty", getProperty);
-    engine_lib->AddCFunction("modifyObject", modifyObject);
-    engine_lib->AddCFunction("loadLevel", loadLevel);
-    engine_lib->AddCFunction("loadUi", loadUi);
-    engine_lib->AddCFunction("playSound", playSound);
-    engine_lib->AddCFunction("getLoadedLevel", getLoadedLevel);
-
-
-
-    lua.AddLibrary(engine_lib);
-    sucess(getLocalizedString("engine.sucess.done", lang));
-
-
-    bool debug = true;
-    bool isMultiplayer = true;
-    string address = "127.0.0.1";
-    /*ServerPlayer serverplayer;
-    serverplayer.address = address;
-    serverplayer.username = "VladTopor";
-    if (isMultiplayer) {
-        serverplayer.join();
-    }*/
-    //playSound("assets/sounds/theme_player.wav", false);
     load_level(config["begin"], false);
-    //load_ui("main");
-    sf::Clock clock;
+    bool cameraDebug = false;
+    string levelDebug = "";
+    string scriptDebug = "";
+    float cameraSpeed = 7.0f;
 
+    int debugId = 0;
+    int debugWidgetId = 0;
+    bool showSelectedHitbox = false;
+    bool showAllHitboxes = false;
+    bool showImgui = false;
+    float fixCameraScale = 1.0f;
+    bool noclip = false;
+    float joyMultiplyX = 1.0;
+    float joyMultiplyY = 1.0;
+    bool joyAnalogMovement = true;
+    int deadzone = 5;
+    string ip = "";
+    int port = 0;
+    int joySelectedWidget = 0;
+    info("Checking controller...");
+    bool joystickAvailable = sf::Joystick::isConnected(0);
+    if (!joystickAvailable) {
+        warn("Controller not available");
+    } else {
+        sucess("Controller available");
+        if (sf::Joystick::hasAxis(0, sf::Joystick::X) && sf::Joystick::hasAxis(0, sf::Joystick::Y)) {
+            joystickAvailable = true;
+        } else {
+            joystickAvailable = false;
+        }
+    }
+    sf::Clock tickClock;
     while (window.isOpen())
     {
-
-        camera.setSize(cameraScale*width, cameraScale*height);
+        //physicEngine.compute(tickrate);
+        isUp = sf::Keyboard::isKeyPressed(codes[keys["up"]]);
+        isDown = sf::Keyboard::isKeyPressed(codes[keys["down"]]);
+        isLeft = sf::Keyboard::isKeyPressed(codes[keys["left"]]);
+        isRight = sf::Keyboard::isKeyPressed(codes[keys["right"]]);
+        camera.setSize(cameraScale*width*fixCameraScale, cameraScale*height*fixCameraScale);
         float currentTime = clock.restart().asSeconds();
+        //info(tickClock.getElapsedTime().asSeconds());
+
         float fps = 1.f / (currentTime);
+        //info(getTickrateMultiplier(fps, tickrate));
         lastTime = currentTime;
-        if (debug) {
-            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left)) camera_x -= 7.0f*getTickrateMultiplier(fps, tickrate);
-            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right)) camera_x += 7.0f*getTickrateMultiplier(fps, tickrate);
-            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Up)) camera_y -= 7.0f*getTickrateMultiplier(fps, tickrate);
-            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down)) camera_y += 7.0f*getTickrateMultiplier(fps, tickrate);
+        if (cameraDebug) {
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Left)) camera_x -= cameraSpeed*getTickrateMultiplier(fps, tickrate);
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Right)) camera_x += cameraSpeed*getTickrateMultiplier(fps, tickrate);
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Up)) camera_y -= cameraSpeed*getTickrateMultiplier(fps, tickrate);
+            if (sf::Keyboard::isKeyPressed(sf::Keyboard::Down)) camera_y += cameraSpeed*getTickrateMultiplier(fps, tickrate);
         }
 
         sf::Event event;
         while (window.pollEvent(event))
         {
+            ImGui::SFML::ProcessEvent(window, event);
             if (event.type == sf::Event::Closed)
                 window.close();
             if (event.type == sf::Event::Resized) {
-                //width = event.size.width;
-                //height = event.size.height;
+                if (config["resize_mode"] == "height") {
+                    fixCameraScale = (static_cast<float>(beginHeight) / static_cast<float>(event.size.height));
+                }
+                if (config["resize_mode"] == "width") {
+                    fixCameraScale = (static_cast<float>(beginWidth) / static_cast<float>(event.size.width));
+                }
+                width = event.size.width;
+                height = event.size.height;
 //                double aspectRatio = static_cast<float>(event.size.width)/static_cast<int>(event.size.height);
 //                info(aspectRatio);
 //                width = beginWidth;
 //                if (config["resize_mode"] == "width") {
 //
 //                    //width = static_cast<int>(static_cast<float>(static_cast<float>(event.size.width)));
-//                    width *= aspectRatio;
+//                    width *= aspectRatio;info(script_rate);
 //                    height = static_cast<int>(static_cast<float>(static_cast<float>(event.size.height)));
 //
 //                }
@@ -667,6 +743,7 @@ int main()
 
         window.clear(background);
         window.setView(camera);
+
         if (isLoading or currentLoading != "") {
 
         }
@@ -674,137 +751,139 @@ int main()
             script_rate += 1.0f*getTickrateMultiplier(fps, tickrate);
             if (trunc(script_rate) > script_now) {
                 script_now = trunc(script_rate);
-                //debug(script_now);
+
 
             }
             //world.Step(timeStep, velocityIterations, positionIterations);
 
             for (int i = 0; i < objects_count; i++) {
+                if (tickClock.getElapsedTime().asSeconds()*tickrate > 1) {
+                    // Every tick run
+                    simulate();
+                    tickClock.restart();
+                }
+                if (showAllHitboxes) {
+                    sf::RectangleShape rect;
+                    rect.setPosition(objects[i].x+1, objects[i].y+1);
+                    rect.setSize(sf::Vector2f((objects[i].width * objects[i].texture.getSize().x)-2,
+                                              (objects[i].height * objects[i].texture.getSize().y)-2));
+                    rect.setOrigin(objects[i].sprite.getOrigin());
+                    rect.setRotation(objects[i].sprite.getRotation());
+                    rect.setFillColor(sf::Color(255, 255, 255, 0));
+                    rect.setOutlineThickness(2.0f);
+                    window.draw(rect);
+                }
                 if (objects[i].loop_script != "assets/scripts/blank.lua") {
                     lua.CompileFileAndRun(objects[i].loop_script);
                 }
+                if (objects[i].physic_enabled) {
+                        objects[i].x = objects[i].getBody()->GetPosition().x*UNIT_SIZE;
+                        objects[i].y = objects[i].getBody()->GetPosition().y*UNIT_SIZE;
+                        objects[i].sprite.setOrigin(objects[i].width*objects[i].texture.getSize().x/2.0f, objects[i].width*objects[i].texture.getSize().y/2.0f);
+                        objects[i].rotation = toDegree(objects[i].getBody()->GetAngle());
+
+
+                }
+                //objects[i].sprite.setOrigin(0.0f, 0.0f);
                 objects[i].apply();
                 if (objects[i].tag == "player") {
-
+                    b2Vec2 movementForce(0.0f, 0.0f);
                     if (!fixedPhysics) {
                         isRight = true;
                     }
                     if (isLeft)
                     {
-                        objects[i].x -= speed*getTickrateMultiplier(tickrate, fps);
-                        for (int j = 0; j < objects_count; j++) {
-                            if (objects[j].tag != "player") {
-                                if (collide(objects[i].x, objects[i].y, objects[i].width*objects[i].texture.getSize().x, objects[i].height*objects[i].texture.getSize().y,
-                                            objects[j].x, objects[j].y, objects[j].width*objects[j].texture.getSize().x, objects[j].height*objects[j].texture.getSize().y, 'l', objects[j].isActive&&!objects[j].ghost)) {
-                                    if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
-                                        lua.CompileFileAndRun(objects[j].collide_script);
-                                        objects[j].isActivated = true;
-                                        break;
-                                    }
-                                    objects[i].x += speed*2*getTickrateMultiplier(tickrate, fps);
+                        b2Vec2 mov(-10.0f, 0.0f);
+                        movementForce += mov;
 
-                                } else {
-                                    objects[j].isActivated = false;
-                                }
-                            }
-                        }
                     }
                     if (isRight)
                     {
-
-                        objects[i].x += speed*getTickrateMultiplier(tickrate, fps);
-                        for (int j = 0; j < objects_count; j++) {
-                            if (objects[j].tag != "player") {
-
-                                if (collide(objects[i].x, objects[i].y, objects[i].width*objects[i].texture.getSize().x, objects[i].height*objects[i].texture.getSize().y,
-                                            objects[j].x, objects[j].y, objects[j].width*objects[j].texture.getSize().x, objects[j].height*objects[j].texture.getSize().y, 'r', objects[j].isActive&&!objects[j].ghost)) {
-                                    if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
-                                        lua.CompileFileAndRun(objects[j].collide_script);
-                                        objects[j].isActivated = true;
-                                        break;
-                                    }
-                                    objects[i].x -= speed*2*getTickrateMultiplier(tickrate, fps);
-
-                                } else {
-                                    objects[j].isActivated = false;
-                                }
-                            }
-                        }
-
+                        b2Vec2 mov(10.0f, 0.0f);
+                        movementForce += mov;
                     }
                     if (isUp)
                     {
+                        b2Vec2 mov(0.0f, -10.0f);
+                        movementForce += mov;
+//                        objects[i].y -= joyMultiplyY*speed*getTickrateMultiplier(tickrate, fps);
+//                        for (int j = 0; j < objects_count; j++) {
+//                            sf::Texture textureOther = objects[j].texture;
+//                            if (objects[j].tag != "player") {
+//
+//                                if (collide(objects[i].x, objects[i].y, objects[i].width*objects[i].texture.getSize().x, objects[i].height*objects[i].texture.getSize().y,
+//                                             objects[j].x, objects[j].y, objects[j].width*textureOther.getSize().x, objects[j].height*textureOther.getSize().y, 'u', objects[j].isActive&&!objects[j].ghost&&!noclip)) {
+//
+//                                    if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
+//                                        lua.CompileFileAndRun(objects[j].collide_script);
+//                                        objects[j].isActivated = true;
+//                                        break;
+//                                    }
+//                                    if (!run) {
+//                                        objects[i].y += speed * getTickrateMultiplier(tickrate, fps);
+//                                    } else {
+//                                        info(1);
+//                                        objects[i].y += fastSpeed * getTickrateMultiplier(tickrate, fps);
+//                                    }
+//
+//                                } else {
+//                                    objects[j].isActivated = false;
+//                                }
+//                            }
+//                        }
+                    }
+                    if (isDown)
+                    {
+                        b2Vec2 mov(0.0f, 10.0f);
+                        movementForce += mov;
+                    }
+                    // for (auto )
+                    for (int j = 0; j<objects_count;j++) {
+                        if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
+                            //info(j);
+                            for (b2Contact* contact = getWorld()->GetContactList(); contact; contact = contact->GetNext()) {
+                                b2Fixture* fixtureA = contact->GetFixtureA();
+                                b2Fixture* fixtureB = contact->GetFixtureB();
 
-                        objects[i].y -= speed*getTickrateMultiplier(tickrate, fps);
-                        for (int j = 0; j < objects_count; j++) {
-                            if (objects[j].tag != "player") {
-
-                                if (collide(objects[i].x, objects[i].y, objects[i].width*objects[i].texture.getSize().x, objects[i].height*objects[i].texture.getSize().y,
-                                             objects[j].x, objects[j].y, objects[j].width*objects[j].texture.getSize().x, objects[j].height*objects[j].texture.getSize().y, 'u', objects[j].isActive&&!objects[j].ghost)) {
-
-                                    if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
-                                        lua.CompileFileAndRun(objects[j].collide_script);
-                                        objects[j].isActivated = true;
-                                        break;
-                                    }
-                                    objects[i].y += speed*2*getTickrateMultiplier(tickrate, fps);
-
-                                } else {
-                                    objects[j].isActivated = false;
+                                if ((fixtureA->GetBody() == objects[i].getBody() && fixtureB->GetBody() == objects[j].getBody()) ||
+                                    (fixtureA->GetBody() == objects[j].getBody() && fixtureB->GetBody() == objects[i].getBody())) {
+                                    lua.CompileFileAndRun(objects[j].collide_script);
+                                    objects[j].isActivated = true;
+                                    break;
                                 }
                             }
                         }
                     }
-                    if (isDown)
-                    {
-
-                        objects[i].y += speed*getTickrateMultiplier(tickrate, fps);
-                        for (int j = 0; j < objects_count; j++) {
-                            if (objects[j].tag != "player") {
-
-                                if (collide(objects[i].x, objects[i].y, objects[i].width*objects[i].texture.getSize().x, objects[i].height*objects[i].texture.getSize().y,
-                                            objects[j].x, objects[j].y, objects[j].width*objects[j].texture.getSize().x, objects[j].height*objects[j].texture.getSize().y, 'd', objects[j].isActive&&!objects[j].ghost)) {
-                                    if (objects[j].tag == "trigger" && objects[j].isActivated == false) {
-                                        lua.CompileFileAndRun(objects[j].collide_script);
-                                        objects[j].isActivated = true;
-                                        break;
-                                    }
-                                    objects[i].y -= speed*2*getTickrateMultiplier(tickrate, fps);
-
-                                } else {
-                                    objects[j].isActivated = false;
-                                }
-                            }
+                    if (objects[i].physic_enabled) {
+                        if (!objects[i].physic_static) {
+                            objects[i].getBody()->SetFixedRotation(true);
+                            objects[i].getBody()->SetLinearVelocity(b2Vec2(0, 0));
+                            movementForce.Normalize();
+                            movementForce*=speed;
+                            objects[i].getBody()->ApplyForceToCenter(movementForce, true);
                         }
                     }
                     if (!fixedPhysics) {
                         //isRight = false;
                         fixedPhysics = true;
                     }
-                    if (!debug && !fixedCamera) {
-                        camera_x = objects[i].x;
-                        camera_y = objects[i].y;
+                    if (!fixedCamera && !cameraDebug) {
+                        camera_x = objects[i].x+(objects[i].texture.getSize().x*objects[i].width)/2;
+                        camera_y = objects[i].y+(objects[i].texture.getSize().y*objects[i].height)/2;
 
                     }
                 }
+
                 if (runLoop) {
 
-                    try {
-
-                        lua.CompileFileAndRun(objects[i].loop_script);
-                    }
-
-                    catch (std::runtime_error& e) {
-                        std::cout << e.what()
-                                  << '\n';
-                    }
+                    lua.CompileFileAndRun(objects[i].loop_script);
 
                 }
-                if (!debug && objects[i].texturePath == "assets/textures/trigger.png") {
+                if (!debug_mode && objects[i].texturePath == "assets/textures/trigger.png") {
                     continue;
                 }
-                objects[i].render(window);
 
+                objects[i].render(window);
                 runLoop = false;
 
             }
@@ -816,9 +895,20 @@ int main()
             }
             camera.setCenter(sf::Vector2f(camera_x, camera_y));
             for (int i=0 ; i< widgets_count; i++) {
-
-                if (sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
-                    if (collide(sf::Mouse::getPosition(window).x, sf::Mouse::getPosition(window).y, 1, 1, widgets[i].fixedX, widgets[i].fixedY, widgets[i].width*256, widgets[i].height*64, 'a', true) && widgets[i].tag == "button") {
+                sf::Texture texture = widgets[i].texture;
+                if (i==joySelectedWidget && widgets[i].tag == "button") {
+                    sf::RectangleShape rect;
+                    rect.setPosition(widgets[i].fixedX+camera_x, widgets[i].fixedY+camera_y);
+                    rect.setSize(sf::Vector2f(widgets[i].width * texture.getSize().x,
+                                              widgets[i].height * texture.getSize().y));
+                    rect.setFillColor(sf::Color(255, 255, 0, 128));
+                    rect.setOutlineColor(sf::Color(255, 255, 0, 128));
+                    rect.setOutlineThickness(2.0f);
+                    window.draw(rect);
+                }
+                if (sf::Mouse::isButtonPressed(sf::Mouse::Left) || (i==joySelectedWidget && joystickAvailable && sf::Joystick::isButtonPressed(0, 0))) {
+                    sf::Vector2f pos = window.mapPixelToCoords(sf::Mouse::getPosition());
+                    if ((collide(pos.x, pos.y, 1, 1, camera_x+widgets[i].fixedX, camera_y+widgets[i].fixedY, widgets[i].width*256/fixCameraScale, (widgets[i].height*64/fixCameraScale), 'a', true) || joystickAvailable )&& widgets[i].tag == "button") {
                         widgets[i].setTexture("assets/textures/button_pressed.png");
                         if (widgets[i].isActivated == false) {
                             lua.CompileFileAndRun(widgets[i].collide_script);
@@ -839,34 +929,259 @@ int main()
                     }
                 }
                 widgets[i].apply();
-                widgets[i].render(window);
+                widgets[i].render(window, camera_x, camera_y);
             }
         }
 
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::O))
+        if (sf::Keyboard::isKeyPressed(sf::Keyboard::F3))
         {
-            debug = true;
+            showImgui = true;
         }
-        if (sf::Keyboard::isKeyPressed(sf::Keyboard::P))
-        {
-
-            debug = false;
+        bool joystickAvailable = sf::Joystick::isConnected(0);
+        if (!joystickAvailable) {
+        } else {
+            if (sf::Joystick::hasAxis(0, sf::Joystick::X) && sf::Joystick::hasAxis(0, sf::Joystick::Y)) {
+                joystickAvailable = true;
+            } else {
+                joystickAvailable = false;
+            }
         }
 
-        isUp = sf::Keyboard::isKeyPressed(sf::Keyboard::W);
-        isDown = sf::Keyboard::isKeyPressed(sf::Keyboard::S);
-        isLeft = sf::Keyboard::isKeyPressed(sf::Keyboard::A);
-        isRight = sf::Keyboard::isKeyPressed(sf::Keyboard::D);
 
+        int joystickX = 0;
+        int joystickY = 0;
+
+        if (joystickAvailable) {
+            joystickX = sf::Joystick::getAxisPosition(0, sf::Joystick::X);
+            joystickY = sf::Joystick::getAxisPosition(0, sf::Joystick::Y);
+            if (sf::Joystick::isButtonPressed(0, 4)) {
+                joySelectedWidget -= 1;
+                if (joySelectedWidget == -1) {
+                    joySelectedWidget = widgets_count-1;
+                } else if (joySelectedWidget == widgets_count) {
+                    joySelectedWidget = 0;
+                }
+
+            }
+            if (sf::Joystick::isButtonPressed(0, 5)) {
+                joySelectedWidget += 1;
+                if (joySelectedWidget == -1) {
+                    joySelectedWidget = widgets_count-1;
+                } else if (joySelectedWidget == widgets_count) {
+                    joySelectedWidget = 0;
+                }
+
+            }
+            if (joyAnalogMovement) {
+                if (joystickX > deadzone) {
+                    isRight = true;
+                }
+                if (joystickX < -deadzone) {
+                    isLeft = true;
+                }
+                if (joystickY > deadzone) {
+                    isDown = true;
+                }
+                if (joystickY < -deadzone) {
+                    isUp = true;
+                }
+
+                joyMultiplyX = abs(static_cast<float>(joystickX)/100);
+                joyMultiplyY = abs(static_cast<float>(joystickY)/100);
+
+            } else {
+                if (joystickX < -50) {
+                    isLeft = true;
+                }
+                if (joystickX > 50) {
+                    isRight = true;
+                }
+                if (joystickY < -50) {
+                    isUp = true;
+                }
+                if (joystickY > 50) {
+                    isDown = true;
+                }
+                joyMultiplyX = 1.0f;
+                joyMultiplyY = 1.0f;
+            }
+
+        }
+        if (sf::Keyboard::isKeyPressed(codes[keys["speed"]])) {
+             run = true;
+        }
+        else {
+            run = false;
+        }
         fps_text.setPosition(fixed_pos(camera_x, camera_y, width, height, cameraScale, cameraScale));
-
         fps_text.setString("FPS="+floatToString(fps));
+        if (showImgui) {
+            ImGui::SFML::Update(window, imgui_clock.restart());
+
+            ImGui::Begin("Platform engine");
+            ImGui::Text(version.c_str());
+            ImGui::Text(("FPS=" + floatToString(fps)).c_str());
+            ImGui::Text(("CX="+floatToString(camera_x)).c_str());
+            ImGui::Text(("CY="+floatToString(camera_y)).c_str());
+
+            ImGui::Checkbox("Show debug objects", &debug_mode);
+            ImGui::Checkbox("Camera debug", &cameraDebug);
+            ImGui::Checkbox("Show hitbox", &showSelectedHitbox);
+            ImGui::Checkbox("Show ALL hitboxes", &showAllHitboxes);
+            ImGui::Checkbox("Noclip", &noclip);
+            ImGui::Checkbox("Joystick available", &joystickAvailable);
+
+            //ImGui::Button("Restart");
+
+            ImGui::InputText("Level name", &levelDebug);
+            if (ImGui::Button("Load level")) {
+                load_level(levelDebug, false);
+            }
+            ImGui::InputText("Script", &scriptDebug);
+            if (ImGui::Button("Load script")) {
+                lua.CompileFileAndRun("assets/scripts/" + scriptDebug + ".lua");
+            }
+            ImGui::SliderFloat("Camera scale", &cameraScale, 0.01f, 5.0f);
+            ImGui::SliderFloat("Camera speed", &cameraSpeed, 0.2f, 30.0f);
+            ImGui::InputFloat("Player speed", &speed);
+            ImGui::InputFloat("Fixed camera scale", &fixCameraScale);
+            if (ImGui::Button("Hide debug menu")) {
+                showImgui = false;
+            }
+            ImGui::InputText("Language", &lang);
+            int br = background.r;
+            int bg = background.g;
+            int bb = background.b;
+
+            ImGui::SliderInt("R", &br, 0, 255);
+            ImGui::SliderInt("G", &bg, 0, 255);
+            ImGui::SliderInt("B", &bb, 0, 255);
+            background.r = br;
+            background.g = bg;
+            background.b = bb;
+
+            ImGui::End();
+            ImGui::Begin("Object manager");
+            if (debugId < 0) {
+                debugId = 0;
+            }
+            if (debugId > objects_count - 1) {
+                debugId = objects_count - 1;
+            }
+
+            ImGui::InputInt("ID", &debugId);
+            ImGui::InputFloat("X", &objects[debugId].x);
+            ImGui::InputFloat("Y", &objects[debugId].y);
+            ImGui::InputFloat("Width", &objects[debugId].width);
+            ImGui::InputFloat("Height", &objects[debugId].height);
+            ImGui::InputInt("R", &objects[debugId].r);
+            ImGui::InputInt("G", &objects[debugId].g);
+            ImGui::InputInt("B", &objects[debugId].b);
+            ImGui::InputInt("A", &objects[debugId].a);
+            ImGui::InputText("Tag", &objects[debugId].tag);
+            if (ImGui::Button("Reapply")) {
+                objects[debugId].getBody()->SetTransform(b2Vec2(objects[debugId].x, objects[debugId].y), toRadian(objects[debugId].rotation));
+                objects[debugId].init();
+            }
+            ImGui::Text("Texture");
+            ImGui::Image(objects[debugId].texture);
+            ImGui::End();
+
+            ImGui::Begin("Widget manager");
+            if (debugWidgetId < 0) {
+                debugWidgetId = 0;
+            }
+            if (debugWidgetId > widgets_count - 1) {
+                debugWidgetId = widgets_count - 1;
+            }
+            ImGui::InputInt("ID", &debugWidgetId);
+            ImGui::InputFloat("X", &widgets[debugWidgetId].fixedX);
+            ImGui::InputFloat("Y", &widgets[debugWidgetId].fixedY);
+            ImGui::InputFloat("Width", &widgets[debugWidgetId].width);
+            ImGui::InputFloat("Height", &widgets[debugWidgetId].height);
+            ImGui::InputFloat("Offset X", &widgets[debugWidgetId].offsetX);
+            ImGui::InputFloat("Offset Y", &widgets[debugWidgetId].offsetY);
+            ImGui::InputInt("Font size", &widgets[debugWidgetId].textSize);
+            //ImGui::InputText("Tag", &widgets[debugWidgetId].tag);
+
+            if (ImGui::Button("Apply")) {
+                widgets[debugWidgetId].init();
+                widgets[debugWidgetId].apply();
+            }
+            ImGui::End();
+
+            ImGui::Begin("Entity manager");
+            ImGui::Button("Spawn entity");
+            ImGui::End();
+
+            ImGui::Begin("Physics");
+
+            ImGui::End();
+
+            ImGui::Begin("Network manager");
+            ImGui::InputText("IP", &ip);
+            ImGui::InputInt("Port", &port);
+            ImGui::Button("Connect");
+
+            ImGui::End();
+            ImGui::Begin("Joystick manager");
+            if (joystickAvailable) {
+                ImGui::Checkbox("Joystick analog movement", &joyAnalogMovement);
+                ImGui::SliderInt("Deadzones", &deadzone, 0, 100);
+                ImGui::SliderInt("X", &joystickX, -100, 100);
+                ImGui::SliderInt("Y", &joystickY, -100, 100);
+                if (sf::Joystick::hasAxis(0, sf::Joystick::Axis::PovX)) {
+                    int joyval = sf::Joystick::getAxisPosition(0, sf::Joystick::Axis::PovX);
+                    ImGui::SliderInt("PovX", &joyval, -100, 100);
+                }
+                if (sf::Joystick::hasAxis(0, sf::Joystick::Axis::PovY)) {
+                    int joyval = sf::Joystick::getAxisPosition(0, sf::Joystick::Axis::PovY);
+                    ImGui::SliderInt("PovY", &joyval, -100, 100);
+                }
+                if (sf::Joystick::hasAxis(0, sf::Joystick::Axis::Z)) {
+                    int joyval = sf::Joystick::getAxisPosition(0, sf::Joystick::Axis::Z);
+                    ImGui::SliderInt("Z", &joyval, -100, 100);
+                }
+                if (sf::Joystick::hasAxis(0, sf::Joystick::Axis::R)) {
+                    int joyval = sf::Joystick::getAxisPosition(0, sf::Joystick::Axis::R);
+                    ImGui::SliderInt("R", &joyval, -100, 100);
+                }
+                if (sf::Joystick::hasAxis(0, sf::Joystick::Axis::U)) {
+                    int joyval = sf::Joystick::getAxisPosition(0, sf::Joystick::Axis::U);
+                    ImGui::SliderInt("U", &joyval, -100, 100);
+                }
+                if (sf::Joystick::hasAxis(0, sf::Joystick::Axis::V)) {
+                    int joyval = sf::Joystick::getAxisPosition(0, sf::Joystick::Axis::V);
+                    ImGui::SliderInt("V", &joyval, -100, 100);
+                }
+                for (int i=0; i<sf::Joystick::getButtonCount(0);i++) {
+                    bool isEnabled = sf::Joystick::isButtonPressed(0, i);
+                    stringstream ss;
+                    ss << i;
+
+                    ImGui::Checkbox(ss.str().c_str(), &isEnabled);
+                }
 
 
-        if (debug) {
-            //info(camera_x);
-            //info(camera_y);
-            window.draw(fps_text);
+
+            } else {
+                ImGui::Text("Joystick is not available!");
+            }
+            ImGui::End();
+
+            if (showSelectedHitbox) {
+                sf::RectangleShape rect;
+                rect.setPosition(objects[debugId].x, objects[debugId].y);
+                rect.setSize(sf::Vector2f(objects[debugId].width * objects[debugId].texture.getSize().x,
+                                          objects[debugId].height * objects[debugId].texture.getSize().y));
+                rect.setOrigin(objects[debugId].sprite.getOrigin());
+                rect.setRotation(objects[debugId].sprite.getRotation());
+                rect.setFillColor(sf::Color(255, 255, 0, 128));
+                rect.setOutlineColor(sf::Color(255, 255, 0, 128));
+                rect.setOutlineThickness(2.0f);
+                window.draw(rect);
+            }
+            ImGui::SFML::Render(window);
         }
         window.display();
     }
